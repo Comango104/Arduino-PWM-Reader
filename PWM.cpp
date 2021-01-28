@@ -4,22 +4,27 @@ const byte MAX_ISR_COUNT = 20;
 
 byte isr_count = 0;
 byte isr_pin[MAX_ISR_COUNT];
-unsigned int isr_value[MAX_ISR_COUNT];
 bool isr_last_state[MAX_ISR_COUNT];
-bool isr_trigger_state[MAX_ISR_COUNT];
-unsigned long isr_timer[MAX_ISR_COUNT];
+unsigned int isr_on_value[MAX_ISR_COUNT];
+unsigned int isr_off_value[MAX_ISR_COUNT];
+unsigned long isr_on_timer[MAX_ISR_COUNT];
+unsigned long isr_off_timer[MAX_ISR_COUNT];
 unsigned long isr_age[MAX_ISR_COUNT];
+unsigned long isr_period[MAX_ISR_COUNT];
 
 void ISR_generic(byte isr) {
     unsigned long now = micros();
     bool state_now = digitalRead(isr_pin[isr]);
-    if (state_now != isr_last_state[isr]) {
-        if (state_now == isr_trigger_state[isr]) {
-            isr_timer[isr] = now;
-        } else {
-            isr_value[isr] = (unsigned int)(now - isr_timer[isr]);
-            isr_age[isr] = now;
-        }
+    if (state_now != isr_last_state[isr]) {										//if change happens
+		if (state_now == 1) {													//if went high
+            isr_on_timer[isr] = now;											//time singal went high
+			isr_off_value[isr] = (unsigned int)(now - isr_off_timer[isr]);		//time signal was low for
+            isr_age[isr] = now;													//time since the last low pulse
+			isr_period[isr] = isr_off_value[isr] + isr_on_value[isr];
+		}else{																	//if went low
+			isr_off_timer[isr] = now;											//time singal went low
+			isr_on_value[isr] = (unsigned int)(now - isr_on_timer[isr]);		//time signal was high for
+		}	
         isr_last_state[isr] = state_now;
     }
 }
@@ -112,9 +117,8 @@ PWM::PWM(byte pin) {
     pinMode(isr_pin[my_isr], INPUT);
 }
 
-int PWM::begin(bool measure_pulse_high) {
+int PWM::begin() {
     isr_last_state[my_isr] = digitalRead(isr_pin[my_isr]);
-    isr_trigger_state[my_isr] = measure_pulse_high;
     
     switch (my_isr) {
         case 0:
@@ -183,14 +187,38 @@ int PWM::begin(bool measure_pulse_high) {
     return 0; // Success.
 }
 
-unsigned int PWM::getValue() {
-    return isr_value[my_isr];
+unsigned int PWM::getOnValue() {
+    return isr_on_value[my_isr];
 }
 
-void PWM::end() {
-    detachInterrupt(digitalPinToInterrupt(isr_pin[my_isr]));
+unsigned int PWM::getOffValue() {
+    return isr_off_value[my_isr];
+}
+
+unsigned int PWM::getPeriod() {
+    return isr_period[my_isr];
+}
+
+unsigned int PWM::getOnDuty() {
+	if (getAge()>(2*isr_period[my_isr])){
+		return 100*isr_last_state;
+	}else{
+		return int(100*float(isr_on_value[my_isr])/float(isr_period[my_isr]));
+	}
+}
+
+unsigned int PWM::getOffDuty() {
+	if (getAge()>(2*isr_period[my_isr])){
+		return 100*(1-isr_last_state);
+	}else{
+		return int(100*float(isr_off_value[my_isr])/float(isr_period[my_isr]));
+	}
 }
 
 unsigned long PWM::getAge() {
     return (micros() - isr_age[my_isr]);
+}
+
+void PWM::end() {
+    detachInterrupt(digitalPinToInterrupt(isr_pin[my_isr]));
 }
